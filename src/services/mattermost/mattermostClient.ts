@@ -2,16 +2,21 @@ import { url } from "inspector";
 import { Dialog } from "./dialogBuilder";
 import { Message } from "./messageBuilder";
 import { User } from "./user";
+import { singleton } from "tsyringe";
 
+@singleton()
 export class MattermostClient {
   private baseUrl: string;
   private token: string;
   private botUserId: string;
 
-  constructor(serverUrl: string, botToken: string, botUserId: string) {
-    this.baseUrl = serverUrl.endsWith("/") ? serverUrl.slice(0, -1) : serverUrl;
-    this.token = botToken;
-    this.botUserId = botUserId;
+  constructor() {
+    const serverUrl = process.env.MATTERMOST_URL!;
+    this.baseUrl = serverUrl!.endsWith("/")
+      ? serverUrl.slice(0, -1)
+      : serverUrl;
+    this.token = process.env.MATTERMOST_TOKEN!;
+    this.botUserId = process.env.MATTERMOST_BOT_USER_ID!;
   }
 
   private async request(
@@ -134,9 +139,10 @@ export class MattermostClient {
 
   async removeBotReactions(postId: string): Promise<any> {
     const reactions = await this.request("GET", `/posts/${postId}/reactions`);
-    const botReactions = reactions.filter(
-      (reaction: any) => reaction.user_id === this.botUserId
-    );
+    const botReactions =
+      reactions?.filter(
+        (reaction: any) => reaction.user_id === this.botUserId
+      ) ?? [];
 
     const promises = botReactions.map((reaction: any) =>
       this.request(
