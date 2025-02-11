@@ -12,8 +12,8 @@ import bodyParser from "body-parser";
 import { MattermostPost } from "./services/mattermost/postAction";
 import "reflect-metadata";
 import { container } from "tsyringe";
-import { BuyService } from "./services/buy/BuyService";
-import { InterestService } from "./services/interest/InterestService";
+import { BuyService } from "./services/buy/buyService";
+import { InterestService } from "./services/interest/interestService";
 
 console.log("Create server...");
 const buyService = container.resolve(BuyService);
@@ -42,8 +42,10 @@ app.post(
     const stateData: { channel_id: string; buy_id: string } = JSON.parse(
       submission.state as string
     );
+    console.log("buyId on save", stateData.buy_id);
+    const edit = stateData.buy_id !== undefined;
     const buyId = stateData.buy_id ?? uuidv4();
-    await buyService.saveBuy(stateData.channel_id, buyId, submission);
+    await buyService.saveBuy(stateData.channel_id, buyId, submission, edit);
     res.status(200).send();
   }
 );

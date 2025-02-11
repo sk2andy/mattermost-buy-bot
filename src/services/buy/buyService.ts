@@ -72,29 +72,58 @@ export class BuyService {
   async saveBuy(
     channelId: string,
     buyId: string,
-    submission: MattermostDialogSubmission
+    submission: MattermostDialogSubmission,
+    edit: boolean = false
   ) {
-    const user = await this.mattermost.getUser(submission.user_id);
+    const shareSize = parseFloat(
+      submission.submission.share_size as string
+    ) as number;
 
-    await this.storageService.saveBuyEntity(
-      submission.channel_id,
-      submission.user_id,
+    const user = await this.mattermost.getUser(submission.user_id);
+    await this.storageService.saveBuyEntity({
+      partitionKey: channelId,
+      rowKey: buyId,
+      channelId,
+      creatorUserId: submission.user_id,
       buyId,
-      submission.submission.buy_name as string,
-      submission.submission.unit_for_shares as "mg" | "ml" | "unit",
-      submission.submission.share_size as number,
-      submission.submission.price_per_share as number,
-      submission.submission.buy_description as string
-    );
+      name: submission.submission.buy_name as string,
+      unitForShares: submission.submission.unit_for_shares as
+        | "mg"
+        | "ml"
+        | "g"
+        | "unit",
+      shareSize,
+      pricePerShare: parseFloat(
+        submission.submission.price_per_share as string
+      ),
+      description: submission.submission.buy_description as string,
+      halfSharesAllowed: submission.submission.half_shares_allowed as boolean,
+      orgFee: parseFloat(submission.submission.org_fee as string),
+      labFee: parseFloat(submission.submission.lab_fee as string),
+    });
+    if (edit) {
+      this.mattermost.sendDirectMessage(
+        submission.user_id,
+        new MessageBuilder()
+          .text(
+            `Buy **${submission.submission.buy_name}** is successfully edited.`
+          )
+          .build()
+      );
+    }
+
     const reply = await this.createSaveBuyConfirmationMessage(
       submission,
       user.username,
-      buyId
+      buyId,
+      edit
     );
     await this.mattermost.postMessage(channelId, reply);
 
-    const manageReply = this.createManageMessage(submission, buyId);
-    await this.mattermost.sendDirectMessage(submission.user_id, manageReply);
+    if (!edit) {
+      const manageReply = this.createManageMessage(submission, buyId);
+      await this.mattermost.sendDirectMessage(submission.user_id, manageReply);
+    }
   }
 
   async closeBuy(post: MattermostPost) {
@@ -130,26 +159,13 @@ export class BuyService {
       channelId,
       buyId
     ))!;
+    console.log("subbi", submission);
     buy.paypal = submission.submission.paypal as string;
     buy.usdcWallet = submission.submission.usdc_wallet as string;
     buy.wiseId = submission.submission.wise_id as string;
     buy.closed = true;
     buy.closedAt = new Date();
-    await this.storageService.saveBuyEntity(
-      channelId,
-      buy.creatorUserId,
-      buyId,
-      buy.name,
-      buy.unitForShares,
-      buy.shareSize,
-      buy.pricePerShare,
-      buy.description,
-      buy.closed,
-      buy.closedAt,
-      buy.paypal,
-      buy.usdcWallet,
-      buy.wiseId
-    );
+    await this.storageService.saveBuyEntity(buy);
     await this.mattermost.postMessage(
       channelId,
       new MessageBuilder()
@@ -197,18 +213,32 @@ export class BuyService {
   private async createSaveBuyConfirmationMessage(
     submission: MattermostDialogSubmission,
     username: string,
-    buyId: string
+    buyId: string,
+    edit: boolean = false
   ): Promise<Message> {
     const reply = new MessageBuilder()
       .fromPayload(submission)
       .text(
-        `🎉 ${username} successfully created a buy: **"${submission.submission.buy_name}"** 🎉\n\n` +
+        `${edit ? "‼️" : "🎉"} ${username} ${
+          edit ? "edited" : "created"
+        } buy: **"${submission.submission.buy_name}"** ${
+          edit ? "‼️" : "🎉"
+        }\n\n` +
           (submission.submission.buy_description
             ? `**Description:** ${submission.submission.buy_description}\n\n`
             : "") +
           `**Share size:** ${submission.submission.share_size} ${submission.submission.unit_for_shares}\n` +
           `**Price per share:** ${submission.submission.price_per_share} USD\n\n` +
-          `Are you interested? Click on the buttons below to engage!`
+          `**Lab Fee:** ${
+            !submission.submission.lab_fee ? 0 : submission.submission.lab_fee
+          } USD (additional costs may occur later)\n` +
+          `**Org Fee:** ${
+            !submission.submission.org_fee ? 0 : submission.submission.org_fee
+          } USD\n\n` +
+          `Are you interested? Click on the button below to engage!` +
+          (edit
+            ? ""
+            : "\n\nCheck your existing interest if present. You can manage your buy by clicking yes below.")
       )
       .attachment((attachment) =>
         attachment
@@ -244,6 +274,12 @@ export class BuyService {
             : "") +
           `**Share size:** ${submission.submission.share_size} ${submission.submission.unit_for_shares}\n` +
           `**Price per share:** ${submission.submission.price_per_share} USD\n\n` +
+          `**Lab Fee:** ${
+            !submission.submission.lab_fee ? 0 : submission.submission.lab_fee
+          } USD (additional costs may occur later)\n` +
+          `**Org Fee:** ${
+            !submission.submission.org_fee ? 0 : submission.submission.org_fee
+          } USD\n\n` +
           `You can manage your buy by clicking on the buttons below.`
       )
       .attachment((attachment) =>
@@ -270,6 +306,19 @@ export class BuyService {
               buy_id: buyId,
             }
           )
+          // .button(
+          //   "downloadcsv",
+          //   "Download csv",
+          //   `${process.env.BOT_URL}/interestlist`,
+          //   {
+          //     action: "interestlist",
+          //     team_id: submission.team_id,
+          //     channel_id: submission.channel_id,
+          //     user_id: submission.user_id,
+          //     //token: submission.token,
+          //     buy_id: buyId,
+          //   }
+          // )
           .button("buyclose", "Close", `${process.env.BOT_URL}/close-buy`, {
             action: "buyclose",
             team_id: submission.team_id,
@@ -325,23 +374,48 @@ export class BuyService {
         options: [
           { text: "mg", value: "mg" },
           { text: "ml", value: "ml" },
+          { text: "g", value: "g" },
           { text: "unit", value: "unit" },
         ],
         default: buy?.unitForShares,
       })
       .textElement({
-        display_name: "Share Size",
+        display_name:
+          "Share Size - insert valid numbers with . as decimal separator",
         name: "share_size",
         optional: false,
-        subtype: "number",
+        subtype: "text",
         default: buy?.shareSize?.toString(),
       })
       .textElement({
-        display_name: "Price per Share in USD",
+        display_name:
+          "Price per Share in USD  – insert valid numbers with . as decimal separator",
         name: "price_per_share",
         optional: false,
-        subtype: "number",
+        subtype: "text",
         default: buy?.pricePerShare?.toString(),
+      })
+      .textElement({
+        display_name:
+          "Org Fee in USD  – insert valid numbers with . as decimal separator",
+        name: "org_fee",
+        optional: true,
+        subtype: "text",
+        default: buy?.pricePerShare?.toString(),
+      })
+      .textElement({
+        display_name:
+          "Lab Fee in USD  – insert valid numbers with . as decimal separator",
+        name: "lab_fee",
+        optional: true,
+        subtype: "text",
+        default: buy?.pricePerShare?.toString(),
+      })
+      .booleanElement({
+        display_name: "Allow half shares",
+        name: "half_shares_allowed",
+        optional: true,
+        default: (buy?.halfSharesAllowed ?? false).toString(),
       })
       .submitLabel("Create")
       .state(JSON.stringify({ channel_id: channelId, buy_id: buy?.buyId }));
@@ -379,11 +453,17 @@ export class BuyService {
     buy: BuyEntity,
     interest: InterestEntity
   ): Message {
-    const amountToPay = interest.shares * buy.pricePerShare;
+    const amountToPay =
+      interest.shares * buy.pricePerShare +
+      (buy.labFee ?? 0) +
+      (buy.orgFee ?? 0);
     let text =
       `🎉 **"${buy.name}"** is now ready for payment! 🎉\n\n` +
       `**Share size:** ${buy.shareSize} ${buy.unitForShares}\n` +
       `**Price per share:** ${buy.pricePerShare} USD\n\n` +
+      `**Number of shares:** ${interest.shares}\n` +
+      `**Org Fee:** ${buy.orgFee ?? 0} USD\n` +
+      `**Lab Fee:** ${buy.labFee ?? 0} USD\n\n` +
       `**Amount to pay:** ${amountToPay} USD\n\n`;
 
     if (!buy.paypal && !buy.usdcWallet && !buy.wiseId) {

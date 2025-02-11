@@ -9,15 +9,18 @@ export interface BuyEntity {
   buyId: string;
   channelId: string;
   name: string;
-  unitForShares: "mg" | "ml" | "unit";
+  unitForShares: "mg" | "ml" | "g" | "unit";
   shareSize: number;
   pricePerShare: number;
+  orgFee?: number;
+  labFee?: number;
   description?: string;
   closed?: boolean;
   closedAt?: Date;
   paypal?: string;
   usdcWallet?: string;
   wiseId?: string;
+  halfSharesAllowed?: boolean;
 }
 
 export interface InterestEntity {
@@ -50,38 +53,8 @@ export class StorageService {
     new AzureNamedKeyCredential(storageAccountName, storageAccountKey)
   );
 
-  async saveBuyEntity(
-    channelId: string,
-    userId: string,
-    buyId: string,
-    name: string,
-    unitForShares: "mg" | "ml" | "unit",
-    shareSize: number,
-    pricePerShare: number,
-    description?: string,
-    closed?: boolean,
-    closedAt?: Date,
-    paypal?: string,
-    usdcWallet?: string,
-    wiseId?: string
-  ) {
-    await this.tableClientBuys.upsertEntity({
-      partitionKey: channelId,
-      rowKey: buyId,
-      channelId,
-      name,
-      unitForShares,
-      pricePerShare,
-      description,
-      shareSize,
-      creatorUserId: userId,
-      buyId,
-      closed,
-      closedAt,
-      paypal,
-      usdcWallet,
-      wiseId,
-    });
+  async saveBuyEntity(buy: BuyEntity) {
+    await this.tableClientBuys.upsertEntity(buy);
   }
 
   async saveInterest(

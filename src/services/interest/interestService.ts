@@ -47,7 +47,8 @@ export class InterestService {
       post.context?.buy_id,
       post.user_id
     );
-    const dialog = this.createInterestDialog(interest, post.context?.buy_id);
+    const buy = (await this.storageService.getBuyEntity(channelId, buyId))!;
+    const dialog = this.createInterestDialog(buy, interest);
     await this.mattermost.openDialog(
       post.trigger_id,
       dialog,
@@ -69,18 +70,29 @@ export class InterestService {
       return;
     }
 
+    const buy = await this.storageService.getBuyEntity(channelId, buyId);
+    const shares = parseFloat(submission.submission.shares as string);
+    if (!Number.isInteger(shares) && !buy?.halfSharesAllowed) {
+      await this.mattermost.postEpemeralMessage(
+        channelId,
+        submission.user_id,
+        "Share size cannot have a fraction if half shares are not allowed. Try again please"
+      );
+      return;
+    }
+
     const interestId = await this.storageService.saveInterest(
       submission.channel_id,
       submission.user_id,
       submission.state as string,
-      parseInt(submission.submission.shares as string, 10),
+      parseFloat(submission.submission.shares as string),
       submission.submission.email as string
     );
 
     await this.mattermost.postEpemeralMessage(
       submission.channel_id,
       submission.user_id,
-      `You have marked your interest with${submission.submission.shares} shares and email ${submission.submission.email}. Click 'Yes' again to edit your interest.`
+      `You have marked your interest with ${submission.submission.shares} shares and email ${submission.submission.email}. Click 'Yes' again to edit your interest.`
     );
   }
 
@@ -243,16 +255,18 @@ export class InterestService {
   }
 
   private createInterestDialog(
-    interest: InterestEntity | undefined,
-    buyId: string
+    buy: BuyEntity,
+    interest: InterestEntity | undefined
   ): Dialog {
     return new DialogBuilder("interest-dialog", "Mark your interest")
       .textElement({
-        display_name: "Shares",
+        display_name: buy.halfSharesAllowed
+          ? "Shares – insert valid numbers with . as decimal separator"
+          : "Shares - only full shares allowed",
         name: "shares",
         optional: false,
         default: `${interest?.shares ?? 1}`,
-        subtype: "number",
+        subtype: "text",
       })
       .textElement({
         display_name: "Email",
@@ -263,7 +277,7 @@ export class InterestService {
       })
       .submitLabel("Submit")
       .notifyOnCancel(false)
-      .state(buyId)
+      .state(buy.buyId)
       .build();
   }
 
